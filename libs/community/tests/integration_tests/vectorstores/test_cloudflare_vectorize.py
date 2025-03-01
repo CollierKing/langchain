@@ -29,6 +29,10 @@ class TestCloudflareVectorize(VectorStoreIntegrationTests):
         """Initialize vector store."""
         account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
         api_token = os.environ.get("CLOUDFLARE_API_TOKEN")
+        d1_api_token = os.environ.get("CLOUDFLARE_D1_API_TOKEN")
+        d1_database_id = os.environ.get("CLOUDFLARE_D1_DATABASE_ID")
+        vectorize_api_token = os.environ.get("CLOUDFLARE_VECTORIZE_API_TOKEN")
+        ai_api_token = os.environ.get("CLOUDFLARE_AI_API_TOKEN")
         
         if not account_id or not api_token:
             pytest.skip("CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN needed for tests")
@@ -47,6 +51,7 @@ class TestCloudflareVectorize(VectorStoreIntegrationTests):
                         api_token=api_token,
                         index_name=index_name,
                     )
+                    
                 except Exception:
                     # Ignore errors if index doesn't exist
                     pass
@@ -58,6 +63,7 @@ class TestCloudflareVectorize(VectorStoreIntegrationTests):
                     index_name=index_name,
                     dimensions=128,
                 )
+                
             except Exception as e:
                 pytest.skip(f"Failed to create test index: {e}")
         
@@ -78,6 +84,7 @@ class TestCloudflareVectorize(VectorStoreIntegrationTests):
                     api_token=api_token,
                     index_name=index_name,
                 )
+                
             except Exception as e:
                 print(f"Error cleaning up test index: {e}")
 
