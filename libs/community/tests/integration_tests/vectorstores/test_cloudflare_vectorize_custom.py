@@ -1,120 +1,103 @@
+import itertools
+import asyncio
+import uuid
 import warnings
+from faker import Faker
+import getpass
+import json
+import pandas as pd
+import os
+from dotenv import load_dotenv
+
+fake = Faker()
+
 warnings.filterwarnings('ignore')
 
 from langchain_community.embeddings.cloudflare_workersai import CloudflareWorkersAIEmbeddings
 from langchain_core.documents import Document
-from libs.community.langchain_community.vectorstores.cloudflare_vectorize import CloudflareVectorize
+from langchain_community.document_loaders import WikipediaLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-import json
-import pandas as pd
-from fusetools.cloud_tools import AWS
-from fusetools.db_conn_tools import Postgres
-import os
+from libs.community.langchain_community.vectorstores.cloudflare_vectorize import CloudflareVectorize, VectorizeRecord
 
 # MARK: - PARAMS
-secret_region_name = "us-east-1"
 MODEL_WORKERSAI = "@cf/baai/bge-large-en-v1.5"
-vectorize_index_name = "cc_kt_docs_test"
+vectorize_index_name = "test-langchain2"
 d1_database_id = "8ce9ce08-8961-475c-98fb-1ef0e6e4ca40"
 
-# MARK: - SECRETS
-str_secret_cc = \
-    AWS.get_secret_manager(
-        secret_name="cc_ccdo_creds",
-        region_name=secret_region_name,
-        pub=os.environ['cc_aws_sm_key'],
-        sec=os.environ['cc_aws_sm_secret']
-    )
+load_dotenv("/Users/collierking/Documents/langchain/libs/community/tests/integration_tests/vectorstores/.env")
 
-json_secret_rds_creds_cc = json.loads(str_secret_cc)
-
-# WorkersAI
-str_secret = \
-    AWS.get_secret_manager(
-        secret_name="cc_cf_creds",
-        region_name=secret_region_name,
-        pub=os.environ['cc_aws_sm_key'],
-        sec=os.environ['cc_aws_sm_secret']
-    )
-
-json_secret_cf = json.loads(str_secret)
-cf_acct_id = json_secret_cf.get("CC_CF_ACCT_NUM")
-cf_ai_token = json_secret_cf.get("CC_CF_AI_API_KEY")
-cf_vectorize_token = json_secret_cf.get("CC_CF_VECTORIZE_KEY")
-d1_api_token = json_secret_cf.get("CC_D1_API_TOKEN")
-
-# MARK: - CLIENTS
-cursor_p_cc, conn_cc = \
-    Postgres.con_postgres(
-        host=json_secret_rds_creds_cc['do_host_cc'],
-        db=json_secret_rds_creds_cc['do_db_cc'],
-        usr=json_secret_rds_creds_cc['do_user_cc'],
-        pwd=json_secret_rds_creds_cc['do_pwd_cc'],
-        port=json_secret_rds_creds_cc['do_port_cc']
-    )
+cf_acct_id = os.getenv("cf_acct_id")
+cf_ai_token = os.getenv("cf_ai_token")
+cf_vectorize_token = os.getenv("cf_vectorize_token")
+d1_api_token = os.getenv("d1_api_token")
 
 # MARK: - PULL DATA
-# query PG for saved and not yet embedded
-tgt_tbl_name = "cc_kt_docs"
-sql = f'''
-SELECT * FROM {tgt_tbl_name}
-LIMIT 1000
-'''
-df_kt_chunks = pd.read_sql_query(sql=sql, con=conn_cc)
+docs = WikipediaLoader(query="Cloudflare", load_max_docs=2).load()
+
+# MARK: - CHUNK
+# recursive character splitter
+text_splitter = \
+    RecursiveCharacterTextSplitter(
+        # Set a really small chunk size, just to show.
+        chunk_size=100,
+        chunk_overlap=20,
+        length_function=len,
+        is_separator_regex=False,
+    )
+texts = text_splitter.create_documents([docs[0].page_content])
+
+running_section = ""
+for idx, text in enumerate(texts):
+    if text.page_content.startswith("="):
+        running_section = text.page_content
+        running_section = running_section.replace("=", "").strip()
+    else:
+        if running_section == "":
+            text.metadata = {"section": "Introduction"}
+        else:
+            text.metadata = {"section": running_section}
 
 # MARK: - UTILS
-embedder = CloudflareWorkersAIEmbeddings(
-    account_id=cf_acct_id,
-    api_token=cf_ai_token,
-    model_name=MODEL_WORKERSAI
-)
-
-cfVect = CloudflareVectorize(
-    embedding=embedder,
-    account_id=cf_acct_id,
-    api_token=cf_vectorize_token,
-    d1_database_id=d1_database_id,
-    ai_api_token=cf_ai_token,
-    d1_api_token=d1_api_token,
-    vectorize_api_token=cf_vectorize_token,
-)
-
-# MARK: - PREP DATA
-# explode data
-df_kt_chunks_exp = df_kt_chunks.explode("arr_knowledge_triples").reset_index(drop=True)
-
-df_kt_chunks_exp['kt_str'] = \
-    df_kt_chunks_exp.apply(
-        lambda
-            x: f"{x['arr_knowledge_triples'].get('subject')} {x['arr_knowledge_triples'].get('predicate')} {x['arr_knowledge_triples'].get('object')}",
-        axis=1
+embedder = \
+    CloudflareWorkersAIEmbeddings(
+        account_id=cf_acct_id,
+        api_token=cf_ai_token,
+        model_name=MODEL_WORKERSAI
     )
 
-df_kt_chunks_exp['kt_id'] = \
-    df_kt_chunks_exp.apply(
-        lambda x: f"{x['arr_knowledge_triples'].get('kt_id')}",
-        axis=1
+cfVect = \
+    CloudflareVectorize(
+        embedding=embedder,
+        account_id=cf_acct_id,
+        api_token=cf_vectorize_token,
+        d1_database_id=d1_database_id,
+        ai_api_token=cf_ai_token,
+        d1_api_token=d1_api_token,
+        vectorize_api_token=cf_vectorize_token,
     )
 
-df_kt_chunks_exp['chunk_id'] = \
-    df_kt_chunks_exp.apply(
-        lambda x: f"{x['arr_knowledge_triples'].get('chunk_id')}",
-        axis=1
-    )
+# MARK: - LIST INDEXES
+arr_indexes = cfVect.list_indexes()
+arr_indexes = [x for x in arr_indexes if "test-langchain" in x.get("name")]
+print(len(arr_indexes))
 
-df_kt_chunks_exp['metadata'] = \
-    df_kt_chunks_exp.apply(
-        lambda x: {
-            "ticker": x['ticker'],
-            "subject": x['arr_knowledge_triples'].get('subject'),
-            "predicate": x['arr_knowledge_triples'].get('predicate'),
-            "object": x['arr_knowledge_triples'].get('object'),
-            "doc_id": x['doc_id'],
-            "doc_type": x['doc_type'],
-            "chunk_id": x['chunk_id'],
-        },
-        axis=1
-    )
+# break into chunks
+arr_indexes_chunks = [arr_indexes[i:i + 10] for i in range(0, len(arr_indexes), 10)]
+
+# MARK: - Async Deletes
+for idx, chunk in enumerate(arr_indexes_chunks):
+    print("Deleting Indexes {}".format(idx))
+    # if idx == 1:
+    #     break
+    arr_async_requests = [
+        cfVect.adelete_index(
+            index_name=x.get("name")
+        )
+        for x in chunk
+    ]
+
+    r = asyncio.get_event_loop().run_until_complete(asyncio.gather(*arr_async_requests))
 
 # MARK: - CREATE INDEX
 try:
@@ -129,27 +112,11 @@ r = \
         index_name=vectorize_index_name,
     )
 
+print(r)
+
 # MARK: - CREATE MD INDEXES
 cfVect.create_metadata_index(
-    property_name="subject",
-    index_type="string",
-    index_name=vectorize_index_name,
-)
-
-cfVect.create_metadata_index(
-    property_name="object",
-    index_type="string",
-    index_name=vectorize_index_name,
-)
-
-cfVect.create_metadata_index(
-    property_name="predicate",
-    index_type="string",
-    index_name=vectorize_index_name,
-)
-
-cfVect.create_metadata_index(
-    property_name="ticker",
+    property_name="section",
     index_type="string",
     index_name=vectorize_index_name,
 )
@@ -158,33 +125,16 @@ print(cfVect.list_metadata_indexes(index_name=vectorize_index_name))
 
 # MARK: - ADD DOCUMENTS
 # split into chunks of 1000
-df_kt_chunks_exp_chunks = [df_kt_chunks_exp[i:i + 1000] for i in range(0, len(df_kt_chunks_exp), 1000)]
-
-for idx, chunk in enumerate(df_kt_chunks_exp_chunks):
-    if idx == 1:
-        break
-    print(f"Adding chunk {chunk.index} of {len(df_kt_chunks_exp_chunks)}")
-    r = cfVect.add_documents(
-        index_name=vectorize_index_name,
-        documents=[
-            Document(
-                page_content=text,
-                metadata=metadata
-            )
-            for text, metadata in zip(
-                chunk['kt_str'].tolist(),
-                chunk['metadata'].tolist()
-            )
-        ],
-        ids=chunk['kt_id'].tolist(),
-        namespaces=[x.get("doc_type") for x in chunk['metadata'].tolist()],
-    )
+r = cfVect.add_documents(
+    index_name=vectorize_index_name,
+    documents=texts
+)
 
 # MARK: - QUERY/SEARCH
 query_documents = \
     cfVect.similarity_search(
         index_name=vectorize_index_name,
-        query="airplanes",
+        query="california",
         k=100,
         filter=None,
         return_metadata="none",
@@ -192,11 +142,12 @@ query_documents = \
 
 arr_records = [dict(x) for x in query_documents]
 df_records = pd.DataFrame(arr_records)
+print(df_records)
 
 query_documents, query_scores = \
     cfVect.similarity_search_with_score(
         index_name=vectorize_index_name,
-        query="airplanes",
+        query="california",
         k=100,
         filter=None,
         return_metadata="all",
@@ -204,40 +155,36 @@ query_documents, query_scores = \
 
 arr_records = [dict(x) for x in query_documents]
 df_records = pd.DataFrame(arr_records)
-
-df_records['id'] = \
-    df_records.apply(
-        lambda x: x['metadata'].get('id'),
-        axis=1
-    )
+print(df_records)
 
 # MARK: - QUERY SEARCH WITH METADATA
 query_documents = \
     cfVect.similarity_search(
         index_name=vectorize_index_name,
-        query="",
+        query="california",
         k=100,
-        filter={
-            "ticker": "HII"
-        },
+        filter={"section": "Introduction"},
         return_metadata="all",
+        return_values=True
     )
 
 arr_records = [dict(x) for x in query_documents]
 df_records = pd.DataFrame(arr_records)
+print(df_records)
 
 arr_sample_ids = df_records['id'].tolist()[:3]
 print(len(arr_sample_ids))
 
 # MARK: - GET BY IDS
-r = \
+query_documents = \
     cfVect.get_by_ids(
         index_name=vectorize_index_name,
         ids=arr_sample_ids
     )
 
-arr_records = [x.to_dict() for x in r]
+arr_records = [dict(x) for x in query_documents]
 df_records = pd.DataFrame(arr_records)
+print(df_records)
 
 # MARK: - DELETE BY IDS
 r = \
@@ -246,17 +193,18 @@ r = \
         ids=arr_sample_ids
     )
 
-print(r)
+print(r.content)
 
 # MARK: - GET BY IDS again
-r = \
+query_documents = \
     cfVect.get_by_ids(
         index_name=vectorize_index_name,
         ids=arr_sample_ids
     )
 
-arr_records = [x.to_dict() for x in r]
+arr_records = [dict(x) for x in query_documents]
 df_records = pd.DataFrame(arr_records)
+print(df_records)
 
 assert len(df_records) == 0
 
@@ -284,8 +232,150 @@ r = \
 
 print(r)
 
-# todo FROM DOCUMENTS
+# MARK: - FROM DOCUMENTS
+cfVect = \
+    CloudflareVectorize.from_documents(
+        account_id=cf_acct_id,
+        index_name=vectorize_index_name,
+        documents=texts,
+        embedding=embedder,
+        api_token=cf_vectorize_token,
+        d1_database_id=d1_database_id,
+        ai_api_token=cf_ai_token,
+        d1_api_token=d1_api_token,
+        vectorize_api_token=cf_vectorize_token
+    )
 
-# todo ADD EMBEDDINGS
+# MARK: - QUERY/SEARCH
+query_documents = \
+    cfVect.similarity_search(
+        index_name=vectorize_index_name,
+        query="california",
+        k=100,
+        filter=None,
+        return_metadata="none",
+    )
 
+arr_records = [dict(x) for x in query_documents]
+df_records = pd.DataFrame(arr_records)
+print(df_records)
+
+# MARK: - DELETE INDEX
+r = \
+    cfVect.delete_index(
+        index_name=vectorize_index_name,
+    )
+
+# MARK: - FROM TEXTS
+cfVect = \
+    CloudflareVectorize.from_texts(
+        account_id=cf_acct_id,
+        index_name=vectorize_index_name,
+        texts=[x.page_content for x in texts],
+        metadatas=[x.metadata for x in texts],
+        embedding=embedder,
+        api_token=cf_vectorize_token,
+        d1_database_id=d1_database_id,
+        ai_api_token=cf_ai_token,
+        d1_api_token=d1_api_token,
+        vectorize_api_token=cf_vectorize_token
+    )
+
+# MARK: - QUERY/SEARCH
+query_documents = \
+    cfVect.similarity_search(
+        index_name=vectorize_index_name,
+        query="california",
+        k=100,
+        filter=None,
+        return_metadata="none",
+    )
+
+arr_records = [dict(x) for x in query_documents]
+df_records = pd.DataFrame(arr_records)
+print(df_records)
+
+# MARK: - ADD EMBEDDINGS
+# get embeddings
+arr_embeddings = [embedder.embed_query(text=x.page_content) for x in texts]
+
+arr_vectors = [
+    VectorizeRecord(
+        id=d.id,
+        text=d.page_content,
+        values=e,
+        metadata=d.metadata,
+    )
+    for e, d in zip(arr_embeddings, texts)
+]
+
+r = \
+    cfVect.add_embeddings(
+        vectors=arr_vectors,
+        index_name=vectorize_index_name,
+    )
+
+print(r)
+
+# MARK: - ASYNC TESTS
 # TODO: REPEAT TEST SCENARIOS FOR ASYNC
+arr_indexes = cfVect.list_indexes()
+arr_indexes = [x for x in arr_indexes if "test-langchain" in x.get("name")]
+print(len(arr_indexes))
+
+# break into chunks
+arr_indexes_chunks = [arr_indexes[i:i + 10] for i in range(0, len(arr_indexes), 10)]
+
+for idx, chunk in enumerate(arr_indexes_chunks):
+    print(f"Deleting chunk {idx} of {len(chunk)} indexes")
+    # if idx == 1:
+    #     break
+    arr_async_requests = [
+        cfVect.adelete_index(
+            index_name=x.get("name")
+        )
+        for x in chunk
+    ]
+
+    r = asyncio.get_event_loop().run_until_complete(asyncio.gather(*arr_async_requests))
+
+# MARK: - ASYNC CREATE INDEXES
+arr_index_names = []
+arr_async_requests = []
+for i in range(2):
+    print(i)
+    index_name = f"{vectorize_index_name}{i}"
+    arr_index_names.append(index_name)
+    arr_async_requests.append(
+        cfVect.acreate_index(
+            index_name=index_name,
+        )
+    )
+
+r = asyncio.get_event_loop().run_until_complete(asyncio.gather(*arr_async_requests))
+
+# MARK: - ASYNC GET INDEXES
+arr_async_requests = []
+for i in range(2):
+    arr_async_requests.append(cfVect.alist_indexes())
+
+r = asyncio.get_event_loop().run_until_complete(asyncio.gather(*arr_async_requests))
+
+arr_indexes = list(itertools.chain(*r))
+arr_index_names = list(set([x.get('name') for x in arr_indexes if "test-langchain" in x.get("name")]))
+len(arr_index_names)
+
+# MARK: - ASYNC CREATE MD INDEXES
+arr_async_requests = []
+for idx, index in enumerate(arr_index_names):
+    arr_async_requests.append(
+        cfVect.acreate_metadata_index(
+            property_name="subject",
+            index_type="string",
+            index_name=index,
+        )
+    )
+
+r = asyncio.get_event_loop().run_until_complete(asyncio.gather(*arr_async_requests))
+
+# MARK: - ASYNC ADD DOCUMENTS
