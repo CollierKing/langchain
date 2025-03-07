@@ -2,6 +2,8 @@ import itertools
 import asyncio
 import uuid
 import warnings
+from datetime import datetime
+
 from faker import Faker
 import getpass
 import json
@@ -78,6 +80,7 @@ cfVect = \
     )
 
 # MARK: - LIST INDEXES
+print(f"list_indexes -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 arr_indexes = cfVect.list_indexes()
 arr_indexes = [x for x in arr_indexes if "test-langchain" in x.get("name")]
 print(len(arr_indexes))
@@ -86,6 +89,7 @@ print(len(arr_indexes))
 arr_indexes_chunks = [arr_indexes[i:i + 10] for i in range(0, len(arr_indexes), 10)]
 
 # MARK: - Async Deletes
+print(f"adelete_index -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 for idx, chunk in enumerate(arr_indexes_chunks):
     print("Deleting Indexes {}".format(idx))
     # if idx == 1:
@@ -100,6 +104,7 @@ for idx, chunk in enumerate(arr_indexes_chunks):
     r = asyncio.get_event_loop().run_until_complete(asyncio.gather(*arr_async_requests))
 
 # MARK: - CREATE INDEX
+print(f"delete_index -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 try:
     cfVect.delete_index(
         index_name=vectorize_index_name
@@ -107,6 +112,7 @@ try:
 except Exception as e:
     print(e)
 
+print(f"create_index -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 r = \
     cfVect.create_index(
         index_name=vectorize_index_name,
@@ -115,6 +121,7 @@ r = \
 print(r)
 
 # MARK: - CREATE MD INDEXES
+print(f"create_metadata_index -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 cfVect.create_metadata_index(
     property_name="section",
     index_type="string",
@@ -124,13 +131,16 @@ cfVect.create_metadata_index(
 print(cfVect.list_metadata_indexes(index_name=vectorize_index_name))
 
 # MARK: - ADD DOCUMENTS
+print(f"add_documents -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 # split into chunks of 1000
 r = cfVect.add_documents(
     index_name=vectorize_index_name,
     documents=texts
 )
 
+
 # MARK: - QUERY/SEARCH
+print(f"similarity_search -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 query_documents = \
     cfVect.similarity_search(
         index_name=vectorize_index_name,
@@ -158,6 +168,7 @@ df_records = pd.DataFrame(arr_records)
 print(df_records)
 
 # MARK: - QUERY SEARCH WITH METADATA
+print(f"similarity_search (metadata filter) -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 query_documents = \
     cfVect.similarity_search(
         index_name=vectorize_index_name,
@@ -176,6 +187,7 @@ arr_sample_ids = df_records['id'].tolist()[:3]
 print(len(arr_sample_ids))
 
 # MARK: - GET BY IDS
+print(f"get_by_ids -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 query_documents = \
     cfVect.get_by_ids(
         index_name=vectorize_index_name,
@@ -187,6 +199,7 @@ df_records = pd.DataFrame(arr_records)
 print(df_records)
 
 # MARK: - DELETE BY IDS
+print(f"get_by_ids -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 r = \
     cfVect.delete(
         index_name=vectorize_index_name,

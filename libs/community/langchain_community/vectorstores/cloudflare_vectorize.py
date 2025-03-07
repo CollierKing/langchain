@@ -1,3 +1,5 @@
+import asyncio
+import time
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Type, TypeVar, Union
 import uuid
 import requests
@@ -185,6 +187,23 @@ class CloudflareVectorize(VectorStore):
             documents.append(Document(id=vector_id, page_content=text_content, metadata=vector_data))
 
         return documents
+
+    # MARK: - _poll_operation_status
+    def _poll_operation_status(self, index_name: str, mutation_id: str):
+        while True:
+            response_index = self.get_index_info(index_name)
+            index_mutation_id = response_index.get("processedUpToMutation")
+            if index_mutation_id == mutation_id:
+                break
+            time.sleep(1)
+
+    async def _apoll_operation_status(self, index_name: str, mutation_id: str):
+        while True:
+            response_index = self.aget_index_info(index_name)
+            index_mutation_id = response_index.get("processedUpToMutation")
+            if index_mutation_id == mutation_id:
+                break
+            await asyncio.sleep(1)
 
     # MARK: - d1_create_table
     def d1_create_table(self, table_name: str, **kwargs) -> Dict[str, Any]:
@@ -573,8 +592,9 @@ class CloudflareVectorize(VectorStore):
             namespaces: Optional[List[str]] = None,
             insert_only: bool = False,
             index_name: str = None,
+            wait: bool = True,
             **kwargs: Any,
-    ) -> List[str]:
+    ) -> Dict:
         """Add texts to the vectorstore.
         
         Args:
@@ -586,9 +606,10 @@ class CloudflareVectorize(VectorStore):
                         the same IDs already exist. If False (default), uses upsert which
                         will create or update vectors.
             index_name: Name of the Vectorize index.
+            wait: If True (default), wait until vectors are ready.
             
         Returns:
-            List of ids from adding the texts into the vectorstore.
+            Operation response with ids of added texts.
             
         Raises:
             ValueError: If the number of texts exceeds MAX_INSERT_SIZE.
@@ -662,7 +683,19 @@ class CloudflareVectorize(VectorStore):
             **kwargs
         )
 
-        return ids
+        operation_response = response.json()
+        mutation_id = operation_response.get("result", {}).get("mutationId")
+
+        if wait and mutation_id:
+            self._poll_operation_status(
+                index_name=index_name,
+                mutation_id=mutation_id,
+            )
+
+        return {
+            **operation_response,
+            "ids": ids
+        }
 
     # MARK: - aadd_texts
     async def aadd_texts(
@@ -673,8 +706,9 @@ class CloudflareVectorize(VectorStore):
             namespaces: Optional[List[str]] = None,
             insert_only: bool = False,
             index_name: str = None,
+            wait: bool = True,
             **kwargs: Any,
-    ) -> List[str]:
+    ) -> Dict:
         """Asynchronously add texts to the vectorstore.
         
         Args:
@@ -765,7 +799,20 @@ class CloudflareVectorize(VectorStore):
                 data=vectors,
             )
 
-        return ids
+        operation_response = response.json()
+        mutation_id = operation_response.get("result", {}).get("mutationId")
+
+        if wait and mutation_id:
+            await self._apoll_operation_status(
+                index_name=index_name,
+                mutation_id=mutation_id,
+            )
+
+        return {
+            **operation_response,
+            "ids": ids
+        }
+
 
     # MARK: - similarity_search
     def similarity_search(
@@ -1908,21 +1955,22 @@ class CloudflareVectorize(VectorStore):
             namespaces: Optional[List[str]] = None,
             insert_only: bool = False,
             index_name: str = None,
+            wait: bool = True,
             **kwargs: Any,
-    ) -> List[str]:
+    ) -> Dict:
         """Add documents to the vectorstore.
         
         Args:
             documents: List of Documents to add to the vectorstore.
-            ids: Optional list of ids to associate with the documents.
             namespaces: Optional list of namespaces for each vector.
             insert_only: If True, uses the insert endpoint which will fail if vectors with 
                         the same IDs already exist. If False (default), uses upsert which
                         will create or update vectors.
             index_name: Name of the Vectorize index.
+            wait: If True (default), poll until all documents have been added.
             
         Returns:
-            List of ids from adding the documents into the vectorstore.
+            Operation response with ids of added documents.
             
         Raises:
             ValueError: If the number of documents exceeds MAX_INSERT_SIZE.
@@ -1933,6 +1981,8 @@ class CloudflareVectorize(VectorStore):
         # Use document IDs if they exist, falling back to provided ids
         if "ids" not in kwargs:
             ids = [doc.id or str(uuid.uuid4()) for doc in documents]
+        else:
+            ids = None
 
         return self.add_texts(
             texts=texts,
@@ -1941,6 +1991,7 @@ class CloudflareVectorize(VectorStore):
             namespaces=namespaces,
             insert_only=insert_only,
             index_name=index_name,
+            wait=wait,
             **kwargs
         )
 
