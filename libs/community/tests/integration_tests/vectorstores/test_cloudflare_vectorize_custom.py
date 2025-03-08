@@ -27,7 +27,8 @@ MODEL_WORKERSAI = "@cf/baai/bge-large-en-v1.5"
 vectorize_index_name = "test-langchain2"
 d1_database_id = "8ce9ce08-8961-475c-98fb-1ef0e6e4ca40"
 
-load_dotenv("/Users/collierking/Documents/langchain/libs/community/tests/integration_tests/vectorstores/.env")
+# load_dotenv("/Users/collierking/Documents/langchain/libs/community/tests/integration_tests/vectorstores/.env")
+load_dotenv("/Users/collierking/Desktop/chartclass/langchain/libs/community/tests/integration_tests/vectorstores/.env")
 
 cf_acct_id = os.getenv("cf_acct_id")
 cf_ai_token = os.getenv("cf_ai_token")
@@ -80,7 +81,7 @@ cfVect = \
     )
 
 # MARK: - LIST INDEXES
-print(f"list_indexes -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+print(f"Step: list_indexes -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 arr_indexes = cfVect.list_indexes()
 arr_indexes = [x for x in arr_indexes if "test-langchain" in x.get("name")]
 print(len(arr_indexes))
@@ -89,7 +90,7 @@ print(len(arr_indexes))
 arr_indexes_chunks = [arr_indexes[i:i + 10] for i in range(0, len(arr_indexes), 10)]
 
 # MARK: - Async Deletes
-print(f"adelete_index -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+print(f"Step: adelete_index -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 for idx, chunk in enumerate(arr_indexes_chunks):
     print("Deleting Indexes {}".format(idx))
     # if idx == 1:
@@ -104,7 +105,7 @@ for idx, chunk in enumerate(arr_indexes_chunks):
     r = asyncio.get_event_loop().run_until_complete(asyncio.gather(*arr_async_requests))
 
 # MARK: - CREATE INDEX
-print(f"delete_index -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+print(f"Step: delete_index -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 try:
     cfVect.delete_index(
         index_name=vectorize_index_name
@@ -112,7 +113,7 @@ try:
 except Exception as e:
     print(e)
 
-print(f"create_index -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+print(f"Step: create_index -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 r = \
     cfVect.create_index(
         index_name=vectorize_index_name,
@@ -121,7 +122,7 @@ r = \
 print(r)
 
 # MARK: - CREATE MD INDEXES
-print(f"create_metadata_index -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+print(f"Step: create_metadata_index -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 cfVect.create_metadata_index(
     property_name="section",
     index_type="string",
@@ -131,16 +132,15 @@ cfVect.create_metadata_index(
 print(cfVect.list_metadata_indexes(index_name=vectorize_index_name))
 
 # MARK: - ADD DOCUMENTS
-print(f"add_documents -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+print(f"Step: add_documents -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 # split into chunks of 1000
 r = cfVect.add_documents(
     index_name=vectorize_index_name,
     documents=texts
 )
 
-
 # MARK: - QUERY/SEARCH
-print(f"similarity_search -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+print(f"Step: similarity_search -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 query_documents = \
     cfVect.similarity_search(
         index_name=vectorize_index_name,
@@ -168,7 +168,7 @@ df_records = pd.DataFrame(arr_records)
 print(df_records)
 
 # MARK: - QUERY SEARCH WITH METADATA
-print(f"similarity_search (metadata filter) -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+print(f"Step: similarity_search (metadata filter) -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 query_documents = \
     cfVect.similarity_search(
         index_name=vectorize_index_name,
@@ -187,7 +187,7 @@ arr_sample_ids = df_records['id'].tolist()[:3]
 print(len(arr_sample_ids))
 
 # MARK: - GET BY IDS
-print(f"get_by_ids -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+print(f"Step: get_by_ids -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 query_documents = \
     cfVect.get_by_ids(
         index_name=vectorize_index_name,
@@ -199,16 +199,17 @@ df_records = pd.DataFrame(arr_records)
 print(df_records)
 
 # MARK: - DELETE BY IDS
-print(f"get_by_ids -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+print(f"Step: delete -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 r = \
     cfVect.delete(
         index_name=vectorize_index_name,
         ids=arr_sample_ids
     )
 
-print(r.content)
+print(r.json())
 
 # MARK: - GET BY IDS again
+print(f"Step: get_by_ids -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 query_documents = \
     cfVect.get_by_ids(
         index_name=vectorize_index_name,
@@ -222,6 +223,7 @@ print(df_records)
 assert len(df_records) == 0
 
 # MARK: - GET INDEX
+print(f"Step: get_index -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 r = \
     cfVect.get_index(
         index_name=vectorize_index_name,
@@ -230,6 +232,7 @@ r = \
 print(r)
 
 # MARK: - GET INDEX INFO
+print(f"Step: get_index_info -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 r = \
     cfVect.get_index_info(
         index_name=vectorize_index_name,
@@ -238,6 +241,7 @@ r = \
 print(r)
 
 # MARK: - DELETE INDEX
+print(f"Step: delete_index -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 r = \
     cfVect.delete_index(
         index_name=vectorize_index_name,
@@ -246,6 +250,7 @@ r = \
 print(r)
 
 # MARK: - FROM DOCUMENTS
+print(f"Step: from_documents -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 cfVect = \
     CloudflareVectorize.from_documents(
         account_id=cf_acct_id,
@@ -260,6 +265,7 @@ cfVect = \
     )
 
 # MARK: - QUERY/SEARCH
+print(f"Step: similarity_search -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 query_documents = \
     cfVect.similarity_search(
         index_name=vectorize_index_name,
@@ -274,12 +280,14 @@ df_records = pd.DataFrame(arr_records)
 print(df_records)
 
 # MARK: - DELETE INDEX
+print(f"Step: delete_index -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 r = \
     cfVect.delete_index(
         index_name=vectorize_index_name,
     )
 
 # MARK: - FROM TEXTS
+print(f"Step: from_texts -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 cfVect = \
     CloudflareVectorize.from_texts(
         account_id=cf_acct_id,
@@ -295,6 +303,7 @@ cfVect = \
     )
 
 # MARK: - QUERY/SEARCH
+print(f"Step: similarity_search -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 query_documents = \
     cfVect.similarity_search(
         index_name=vectorize_index_name,
@@ -309,6 +318,7 @@ df_records = pd.DataFrame(arr_records)
 print(df_records)
 
 # MARK: - ADD EMBEDDINGS
+print(f"Step: similarity_search -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 # get embeddings
 arr_embeddings = [embedder.embed_query(text=x.page_content) for x in texts]
 

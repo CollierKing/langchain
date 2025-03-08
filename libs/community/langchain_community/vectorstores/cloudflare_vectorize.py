@@ -188,8 +188,8 @@ class CloudflareVectorize(VectorStore):
 
         return documents
 
-    # MARK: - _poll_operation_status
-    def _poll_operation_status(self, index_name: str, mutation_id: str):
+    # MARK: - _poll_mutation_status
+    def _poll_mutation_status(self, index_name: str, mutation_id: str):
         while True:
             response_index = self.get_index_info(index_name)
             index_mutation_id = response_index.get("processedUpToMutation")
@@ -197,9 +197,9 @@ class CloudflareVectorize(VectorStore):
                 break
             time.sleep(1)
 
-    async def _apoll_operation_status(self, index_name: str, mutation_id: str):
+    async def _apoll_mutation_status(self, index_name: str, mutation_id: str):
         while True:
-            response_index = self.aget_index_info(index_name)
+            response_index = await self.aget_index_info(index_name)
             index_mutation_id = response_index.get("processedUpToMutation")
             if index_mutation_id == mutation_id:
                 break
@@ -592,6 +592,7 @@ class CloudflareVectorize(VectorStore):
             namespaces: Optional[List[str]] = None,
             insert_only: bool = False,
             index_name: str = None,
+            include_d1: bool = True,
             wait: bool = True,
             **kwargs: Any,
     ) -> Dict:
@@ -613,6 +614,7 @@ class CloudflareVectorize(VectorStore):
             
         Raises:
             ValueError: If the number of texts exceeds MAX_INSERT_SIZE.
+            :param include_d1:
         """
         if not index_name:
             raise ValueError("index_name must be provided")
@@ -676,24 +678,27 @@ class CloudflareVectorize(VectorStore):
         )
         response.raise_for_status()
 
-        # add values to D1Database
-        self.d1_upsert_texts(
-            table_name=index_name,
-            data=vectors,
-            **kwargs
-        )
+        if include_d1:
+            # todo; create d1 table?
 
-        operation_response = response.json()
-        mutation_id = operation_response.get("result", {}).get("mutationId")
+            # add values to D1Database
+            self.d1_upsert_texts(
+                table_name=index_name,
+                data=vectors,
+                **kwargs
+            )
+
+        mutation_response = response.json()
+        mutation_id = mutation_response.get("result", {}).get("mutationId")
 
         if wait and mutation_id:
-            self._poll_operation_status(
+            self._poll_mutation_status(
                 index_name=index_name,
                 mutation_id=mutation_id,
             )
 
         return {
-            **operation_response,
+            **mutation_response,
             "ids": ids
         }
 
@@ -706,6 +711,7 @@ class CloudflareVectorize(VectorStore):
             namespaces: Optional[List[str]] = None,
             insert_only: bool = False,
             index_name: str = None,
+            include_d1: bool = True,
             wait: bool = True,
             **kwargs: Any,
     ) -> Dict:
@@ -788,6 +794,10 @@ class CloudflareVectorize(VectorStore):
             )
             response.raise_for_status()
 
+        mutation_response = response.json()
+        mutation_id = mutation_response.get("result", {}).get("mutationId")
+
+        if include_d1:
             # create D1 table if not exists
             await self.ad1_create_table(
                 table_name=index_name
@@ -799,20 +809,16 @@ class CloudflareVectorize(VectorStore):
                 data=vectors,
             )
 
-        operation_response = response.json()
-        mutation_id = operation_response.get("result", {}).get("mutationId")
-
         if wait and mutation_id:
-            await self._apoll_operation_status(
+            await self._apoll_mutation_status(
                 index_name=index_name,
                 mutation_id=mutation_id,
             )
 
         return {
-            **operation_response,
+            **mutation_response,
             "ids": ids
         }
-
 
     # MARK: - similarity_search
     def similarity_search(
@@ -824,6 +830,7 @@ class CloudflareVectorize(VectorStore):
             namespace: Optional[str] = None,
             return_metadata: str = "none",
             return_values: bool = False,
+            include_d1: bool = True,
             **kwargs: Any
     ) -> List[Document]:
         """Search for similar documents to a query string."""
@@ -839,6 +846,7 @@ class CloudflareVectorize(VectorStore):
                 index_name=index_name,
                 return_metadata=return_metadata,
                 return_values=return_values,
+                include_d1=include_d1,
                 **kwargs
             )
 
@@ -854,6 +862,7 @@ class CloudflareVectorize(VectorStore):
             namespace: Optional[str] = None,
             return_metadata: str = "none",
             return_values: bool = False,
+            include_d1: bool = True,
             **kwargs: Any
     ) -> Tuple[List[Document], List[float]]:
         """Search for similar vectors to a query string and return with scores."""
@@ -892,18 +901,20 @@ class CloudflareVectorize(VectorStore):
             **kwargs
         )
         response.raise_for_status()
-
         results = response.json().get("result", {}).get("matches", [])
 
-        # query D1 for raw results
-        ids = [x.get("id") for x in results]
+        if include_d1:
+            # query D1 for raw results
+            ids = [x.get("id") for x in results]
 
-        d1_results_records = \
-            self.d1_get_by_ids(
-                index_name=index_name,
-                ids=ids,
-                **kwargs
-            )
+            d1_results_records = \
+                self.d1_get_by_ids(
+                    index_name=index_name,
+                    ids=ids,
+                    **kwargs
+                )
+        else:
+            d1_results_records = []
 
         # Use _combine_vectorize_and_d1_data to create documents
         documents = self._combine_vectorize_and_d1_data(results, d1_results_records)
@@ -921,6 +932,7 @@ class CloudflareVectorize(VectorStore):
             filter: Optional[Dict[str, Any]] = None,
             namespace: Optional[str] = None,
             index_name: str = None,
+            include_d1: bool = True,
             **kwargs: Any,
     ) -> List[Document]:
         """Asynchronously search for similar documents to a query string.
@@ -944,6 +956,7 @@ class CloudflareVectorize(VectorStore):
             filter=filter,
             namespace=namespace,
             index_name=index_name,
+            include_d1=include_d1,
             **kwargs
         )
         return results[0]
@@ -958,6 +971,7 @@ class CloudflareVectorize(VectorStore):
             index_name: str = None,
             return_metadata: Optional[str] = "none",
             return_values: bool = False,
+            include_d1: bool = True,
             **kwargs: Any,
     ) -> Tuple[List[Document], List[float]]:
         """Asynchronously search for similar vectors to a query string and return with scores.
@@ -1021,36 +1035,28 @@ class CloudflareVectorize(VectorStore):
                 json=search_request,
             )
             response.raise_for_status()
-
             response_data = response.json()
 
         results = response_data.get("result", {}).get("matches", [])
 
-        documents = []
-        scores = []
+        if include_d1:
+            # query D1 for raw results
+            ids = [x.get("id") for x in results]
 
-        for result in results:
-            # Create a Document with the complete vector data in metadata
-            vector_data = {
-                "id": result.get("id"),
-                "score": result.get("score", 0.0),
-            }
+            d1_results_records = \
+                await self.ad1_get_by_ids(
+                    index_name=index_name,
+                    ids=ids,
+                    **kwargs
+                )
+        else:
+            d1_results_records = []
 
-            # Add metadata if returned
-            if "metadata" in result:
-                vector_data["metadata"] = result.get("metadata", {})
+        # Use _combine_vectorize_and_d1_data to create documents
+        documents = self._combine_vectorize_and_d1_data(results, d1_results_records)
 
-            # Add namespace if returned
-            if "namespace" in result:
-                vector_data["namespace"] = result.get("namespace")
-
-            # Add values if returned
-            if "values" in result:
-                vector_data["values"] = result.get("values", [])
-
-            # Create a Document with empty page content and the vector data as metadata
-            documents.append(Document(page_content="", metadata=vector_data))
-            scores.append(result.get("score", 0.0))
+        # Extract scores from results
+        scores = [result.get("score", 0.0) for result in results]
 
         return documents, scores
 
@@ -1059,8 +1065,10 @@ class CloudflareVectorize(VectorStore):
             self,
             ids: List[str],
             index_name: str = None,
+            include_d1: bool = True,
+            wait: bool = True,
             **kwargs: Any
-    ) -> None:
+    ) -> Dict:
         """Delete vectors by ID from the vectorstore.
         
         Args:
@@ -1080,20 +1088,35 @@ class CloudflareVectorize(VectorStore):
         )
         response.raise_for_status()
 
-        self.d1_delete(
-            index_name=index_name,
-            ids=ids
-        )
+        if include_d1:
+            self.d1_delete(
+                index_name=index_name,
+                ids=ids
+            )
 
-        return response
+        mutation_response = response.json()
+        mutation_id = mutation_response.get("result", {}).get("mutationId")
+
+        if wait and mutation_id:
+            self._poll_mutation_status(
+                index_name=index_name,
+                mutation_id=mutation_id,
+            )
+
+        return {
+            **mutation_response,
+            "ids": ids
+        }
 
     # MARK: - adelete
     async def adelete(
             self,
             ids: List[str],
             index_name: str = None,
+            include_d1: bool = True,
+            wait: bool = True,
             **kwargs: Any
-    ) -> None:
+    ) -> Dict:
         """Asynchronously delete vectors by ID from the vectorstore.
         
         Args:
@@ -1116,17 +1139,33 @@ class CloudflareVectorize(VectorStore):
             )
         response.raise_for_status()
 
-        await self.ad1_delete_texts(
-            table_name=index_name,
-            ids=ids,
-            **kwargs
-        )
+        mutation_response = response.json()
+        mutation_id = mutation_response.get("result", {}).get("mutationId")
+
+        if include_d1:
+            await self.ad1_delete(
+                table_name=index_name,
+                ids=ids,
+                **kwargs
+            )
+
+        if wait and mutation_id:
+            await self._apoll_mutation_status(
+                index_name=index_name,
+                mutation_id=mutation_id,
+            )
+
+        return {
+            **mutation_response,
+            "ids": ids
+        }
 
     # MARK: - get_by_ids
     def get_by_ids(
             self,
             ids: List[str],
             index_name: str = None,
+            include_d1: bool = True,
             **kwargs
     ) -> List[Document]:
         """Get vectors by their IDs.
@@ -1154,12 +1193,15 @@ class CloudflareVectorize(VectorStore):
 
         vector_data = response.json().get("result", {})
 
-        # Get text data from D1 database
-        d1_response = self.d1_get_by_ids(
-            index_name=index_name,
-            ids=ids,
-            **kwargs
-        )
+        if include_d1:
+            # Get text data from D1 database
+            d1_response = self.d1_get_by_ids(
+                index_name=index_name,
+                ids=ids,
+                **kwargs
+            )
+        else:
+            d1_response = []
 
         # Combine data into VectorizeRecord objects
         documents = \
@@ -1175,6 +1217,7 @@ class CloudflareVectorize(VectorStore):
             self,
             ids: List[str],
             index_name: str = None,
+            include_d1: bool = True,
             **kwargs
     ) -> List[Document]:
         """Asynchronously get vectors by their IDs.
@@ -1203,11 +1246,14 @@ class CloudflareVectorize(VectorStore):
             )
         response.raise_for_status()
 
-        d1_response = await self.ad1_get_by_ids(
-            index_name=index_name,
-            ids=ids,
-            **kwargs
-        )
+        if include_d1:
+            d1_response = await self.ad1_get_by_ids(
+                index_name=index_name,
+                ids=ids,
+                **kwargs
+            )
+        else:
+            d1_response = []
 
         documents = \
             self._combine_vectorize_and_d1_data(
@@ -1479,6 +1525,7 @@ class CloudflareVectorize(VectorStore):
             dimensions: int = DEFAULT_DIMENSIONS,
             metric: str = DEFAULT_METRIC,
             description: Optional[str] = None,
+            include_d1: bool = True,
             **kwargs
     ) -> Dict[str, Any]:
         """Create a new Vectorize index.
@@ -1533,11 +1580,12 @@ class CloudflareVectorize(VectorStore):
         )
         response.raise_for_status()
 
-        # Create D1 table if not exists
-        self.d1_create_table(
-            table_name=index_name,
-            **kwargs
-        )
+        if include_d1:
+            # Create D1 table if not exists
+            self.d1_create_table(
+                table_name=index_name,
+                **kwargs
+            )
 
         return response.json().get("result", {})
 
@@ -1548,6 +1596,7 @@ class CloudflareVectorize(VectorStore):
             dimensions: int = DEFAULT_DIMENSIONS,
             metric: str = DEFAULT_METRIC,
             description: Optional[str] = None,
+            include_d1: bool = True,
             **kwargs
     ) -> Dict[str, Any]:
         """Asyncronously Create a new Vectorize index.
@@ -1594,6 +1643,7 @@ class CloudflareVectorize(VectorStore):
 
             response_data = response.json()
 
+        if include_d1:
             # create D1 table if not exists
             await self.ad1_create_table(
                 table_name=index_name,
@@ -1655,6 +1705,7 @@ class CloudflareVectorize(VectorStore):
     def delete_index(
             self,
             index_name: str,
+            include_d1: bool = True,
             **kwargs
     ) -> Dict[str, Any]:
         """Delete a Vectorize index."""
@@ -1673,10 +1724,11 @@ class CloudflareVectorize(VectorStore):
         )
         response.raise_for_status()
 
-        # delete D1 table if exists
-        self.d1_drop_table(
-            table_name=index_name
-        )
+        if include_d1:
+            # delete D1 table if exists
+            self.d1_drop_table(
+                table_name=index_name
+            )
 
         return response.json().get("result", {})
 
@@ -1684,6 +1736,7 @@ class CloudflareVectorize(VectorStore):
     async def adelete_index(
             self,
             index_name: str,
+            include_d1: bool = True,
             **kwargs
     ) -> Dict[str, Any]:
         """Asynchronously delete a Vectorize index."""
@@ -1708,6 +1761,7 @@ class CloudflareVectorize(VectorStore):
 
             response_data = response.json()
 
+        if include_d1:
             await self.ad1_drop_table(
                 table_name=index_name
             )
@@ -1824,130 +1878,6 @@ class CloudflareVectorize(VectorStore):
 
         return vectorstore
 
-    # MARK: - add_embeddings
-    def add_embeddings(
-            self,
-            vectors: List[VectorizeRecord],
-            insert_only: bool = False,
-            index_name: str = None,
-            **kwargs: Any,
-    ) -> List[str]:
-        """Add pre-computed embeddings to the vectorstore.
-        
-        This method allows adding vectors directly without computing embeddings.
-        
-        Args:
-            vectors: List of VectorizeRecord objects to add to the vectorstore.
-            insert_only: If True, uses the insert endpoint which will fail if vectors with 
-                        the same IDs already exist. If False (default), uses upsert which
-                        will create or update vectors.
-            index_name: Name of the Vectorize index.
-            
-        Returns:
-            List of ids from adding the vectors into the vectorstore.
-            
-        Raises:
-            ValueError: If the number of vectors exceeds MAX_INSERT_SIZE.
-        """
-        if not index_name:
-            raise ValueError("index_name must be provided")
-
-        # Check if the number of vectors exceeds the maximum allowed
-        if len(vectors) > MAX_INSERT_SIZE:
-            raise ValueError(
-                f"Number of vectors ({len(vectors)}) exceeds maximum allowed ({MAX_INSERT_SIZE})"
-            )
-
-        # Convert VectorizeRecord objects to dictionaries
-        vector_dicts = [vector.to_dict() for vector in vectors]
-
-        if list(set(x.get("id") for x in vector_dicts)) == [None]:
-            [x.update({"id": str(uuid.uuid4())}) for x in vector_dicts]
-
-        for v in vector_dicts:
-            del v['text']
-
-        # Choose endpoint based on insert_only parameter
-        endpoint = "insert" if insert_only else "upsert"
-
-        # Convert vectors to newline-delimited JSON
-        ndjson_data = "\n".join(json.dumps(vector_dict) for vector_dict in vector_dicts)
-
-        # Copy headers and set correct content type for NDJSON
-        headers = self._headers.copy()
-        headers["Content-Type"] = "application/x-ndjson"
-
-        # Make API call to insert/upsert vectors
-        response = requests.post(
-            self._get_url(endpoint, index_name),
-            headers=headers,  # Use the NDJSON-specific headers
-            data=ndjson_data.encode('utf-8'),
-            **kwargs
-        )
-        response.raise_for_status()
-
-        # Return the IDs of the added vectors
-        return [vector.id for vector in vectors]
-
-    # MARK: - aadd_embeddings
-    async def aadd_embeddings(
-            self,
-            vectors: List[VectorizeRecord],
-            insert_only: bool = False,
-            index_name: str = None,
-            **kwargs: Any,
-    ) -> List[str]:
-        """Asynchronously add pre-computed embeddings to the vectorstore.
-        
-        This method allows adding vectors directly without computing embeddings.
-        
-        Args:
-            vectors: List of VectorizeRecord objects to add to the vectorstore.
-            insert_only: If True, uses the insert endpoint which will fail if vectors with 
-                        the same IDs already exist. If False (default), uses upsert which
-                        will create or update vectors.
-            index_name: Name of the Vectorize index.
-            
-        Returns:
-            List of ids from adding the vectors into the vectorstore.
-            
-        Raises:
-            ValueError: If the number of vectors exceeds MAX_INSERT_SIZE.
-        """
-        if not index_name:
-            raise ValueError("index_name must be provided")
-
-        # Check if the number of vectors exceeds the maximum allowed
-        if len(vectors) > MAX_INSERT_SIZE:
-            raise ValueError(
-                f"Number of vectors ({len(vectors)}) exceeds maximum allowed ({MAX_INSERT_SIZE})"
-            )
-
-        # Convert VectorizeRecord objects to dictionaries
-        vector_dicts = [vector.to_dict() for vector in vectors]
-
-        # Choose endpoint based on insert_only parameter
-        endpoint = "insert" if insert_only else "upsert"
-
-        # Convert vectors to newline-delimited JSON
-        ndjson_data = "\n".join(json.dumps(vector_dict) for vector_dict in vector_dicts)
-
-        # Import httpx here to avoid dependency issues
-        import httpx
-
-        # Make API call to insert/upsert vectors
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                self._get_url(endpoint, index_name),
-                headers=self._headers,
-                content=ndjson_data.encode('utf-8'),
-                **kwargs
-            )
-            response.raise_for_status()
-
-        # Return the IDs of the added vectors
-        return [vector.id for vector in vectors]
-
     # MARK: - add_documents
     def add_documents(
             self,
@@ -2003,8 +1933,9 @@ class CloudflareVectorize(VectorStore):
             namespaces: Optional[List[str]] = None,
             insert_only: bool = False,
             index_name: str = None,
+            include_d1: bool = True,
             **kwargs: Any,
-    ) -> List[str]:
+    ) -> Dict:
         """Asynchronously add documents to the vectorstore.
         
         Args:
@@ -2036,6 +1967,7 @@ class CloudflareVectorize(VectorStore):
             namespaces=namespaces,
             insert_only=insert_only,
             index_name=index_name,
+            include_d1=include_d1,
             **kwargs
         )
 
@@ -2079,6 +2011,8 @@ class CloudflareVectorize(VectorStore):
 
         if "ids" not in kwargs:
             ids = [doc.id for doc in documents]
+        else:
+            ids = None
 
         return cls.from_texts(
             texts=texts,
@@ -2135,6 +2069,8 @@ class CloudflareVectorize(VectorStore):
 
         if "ids" not in kwargs:
             ids = [doc.id for doc in documents]
+        else:
+            ids = None
 
         return await cls.afrom_texts(
             texts=texts,
