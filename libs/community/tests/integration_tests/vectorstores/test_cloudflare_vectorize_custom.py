@@ -1,22 +1,14 @@
 import itertools
 import asyncio
-import uuid
 import warnings
 from datetime import datetime
-
-from faker import Faker
-import getpass
-import json
 import pandas as pd
 import os
 from dotenv import load_dotenv
 
-fake = Faker()
-
 warnings.filterwarnings('ignore')
 
 from langchain_community.embeddings.cloudflare_workersai import CloudflareWorkersAIEmbeddings
-from langchain_core.documents import Document
 from langchain_community.document_loaders import WikipediaLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -33,7 +25,7 @@ load_dotenv("/Users/collierking/Desktop/chartclass/langchain/libs/community/test
 cf_acct_id = os.getenv("cf_acct_id")
 cf_ai_token = os.getenv("cf_ai_token")
 cf_vectorize_token = os.getenv("cf_vectorize_token")
-d1_api_token = os.getenv("d1_api_token")
+cf_d1_token = os.getenv("d1_api_token")
 
 # MARK: - PULL DATA
 docs = WikipediaLoader(query="Cloudflare", load_max_docs=2).load()
@@ -76,7 +68,7 @@ cfVect = \
         api_token=cf_vectorize_token,
         d1_database_id=d1_database_id,
         ai_api_token=cf_ai_token,
-        d1_api_token=d1_api_token,
+        d1_api_token=cf_d1_token,
         vectorize_api_token=cf_vectorize_token,
     )
 
@@ -257,10 +249,10 @@ cfVect = \
         index_name=vectorize_index_name,
         documents=texts,
         embedding=embedder,
-        api_token=cf_vectorize_token,
-        d1_database_id=d1_database_id,
+        # api_token=cf_vectorize_token,
+        # d1_database_id=d1_database_id,
         ai_api_token=cf_ai_token,
-        d1_api_token=d1_api_token,
+        # d1_api_token=cf_d1_token,
         vectorize_api_token=cf_vectorize_token
     )
 
@@ -296,9 +288,9 @@ cfVect = \
         metadatas=[x.metadata for x in texts],
         embedding=embedder,
         api_token=cf_vectorize_token,
-        d1_database_id=d1_database_id,
+        # d1_database_id=d1_database_id,
         ai_api_token=cf_ai_token,
-        d1_api_token=d1_api_token,
+        # d1_api_token=cf_d1_token,
         vectorize_api_token=cf_vectorize_token
     )
 
@@ -317,28 +309,9 @@ arr_records = [dict(x) for x in query_documents]
 df_records = pd.DataFrame(arr_records)
 print(df_records)
 
-# MARK: - ADD EMBEDDINGS
-print(f"Step: similarity_search -- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-# get embeddings
-arr_embeddings = [embedder.embed_query(text=x.page_content) for x in texts]
 
-arr_vectors = [
-    VectorizeRecord(
-        id=d.id,
-        text=d.page_content,
-        values=e,
-        metadata=d.metadata,
-    )
-    for e, d in zip(arr_embeddings, texts)
-]
 
-r = \
-    cfVect.add_embeddings(
-        vectors=arr_vectors,
-        index_name=vectorize_index_name,
-    )
 
-print(r)
 
 # MARK: - ASYNC TESTS
 # TODO: REPEAT TEST SCENARIOS FOR ASYNC
